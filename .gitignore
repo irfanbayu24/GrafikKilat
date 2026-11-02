@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.streamlit/secrets.toml
+# jangan commit data asli:
+*.xlsx
+*.xls
+*.xlsm
+*.ods
+*.csv
+*.docx

@@ -1,0 +1,10 @@
+streamlit>=1.40          # st.navigation (menu) butuh >= 1.36
+pandas>=2.1
+numpy>=1.26
+plotly>=5.20
+openpyxl>=3.1            # baca/tulis .xlsx dan .xlsm
+xlrd>=2.0.1              # baca .xls (format Excel lama)
+odfpy>=1.4.1             # baca .ods (LibreOffice)
+python-docx>=1.1         # AUTOCert: mail merge template Word
+lxml>=5.0                # dipakai langsung oleh certlib (juga dependensi python-docx)
+comtypes>=1.4; sys_platform == "win32"   # opsional: konversi PDF lewat Microsoft Word
