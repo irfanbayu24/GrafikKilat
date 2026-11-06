@@ -171,8 +171,10 @@ def render() -> None:
     fmt = fmt_label.lower()
     backend = None
     if not backends:
-        st.info("PDF membutuhkan Microsoft Word (Windows) atau LibreOffice di komputer/server ini. "
-                "Saat ini hanya keluaran DOCX yang tersedia.")
+        st.info("PDF membutuhkan Microsoft Word (Windows) atau LibreOffice di komputer/server ini, dan belum ditemukan. "
+                "Saat ini hanya keluaran DOCX yang tersedia. **Ubuntu/Linux:** `sudo apt install libreoffice-writer`. "
+                "**Streamlit Cloud:** tambahkan berkas `packages.txt` (berisi `libreoffice-writer`) di root repository "
+                "lalu deploy ulang — lihat README.")
     elif fmt == "pdf":
         if len(backends) > 1:
             backend = st.radio("Mesin konversi PDF", backends, format_func=certlib.BACKEND_LABELS.get,
