@@ -64,6 +64,13 @@ _INSTR_TEXT = re.compile(r"<w:instrText[^>]*>([^<]*)</w:instrText>")
 _INSTR_ATTR = re.compile(r'w:instr="([^"]*)"')
 _DANGEROUS_FIELD = re.compile(r"\b(INCLUDETEXT|INCLUDEPICTURE|DDEAUTO|DDE|LINK|IMPORT)\b", re.IGNORECASE)
 _REL = re.compile(r"<Relationship\b[^>]*>")
+_BENIGN_EXTERNAL = {"hyperlink", "attachedtemplate", "mailmergesource"}
+_EXTERNAL_DESC = {
+    "image": "gambar yang hanya tertaut ke file di luar dokumen (bukan tertanam)",
+    "oleobject": "objek OLE tertaut ke file lain",
+    "frame": "frame tertaut ke file lain",
+    "subdocument": "sub-dokumen tertaut ke file lain",
+}
 
 
 def validate_template(filename: str, data: bytes) -> None:
@@ -101,9 +108,55 @@ def validate_template(filename: str, data: bytes) -> None:
                                 "LINK, DDE, atau IMPORT). Hapus field tersebut demi keamanan.")
         elif re.fullmatch(r"word/_rels/[^/]+\.rels", n):
             for rel in _REL.findall(zf.read(n).decode("utf-8", "ignore")):
-                if 'TargetMode="External"' in rel and not re.search(r'Type="[^"]*/hyperlink"', rel):
-                    raise CertError("Template memuat tautan eksternal selain hyperlink biasa "
-                                    "(mis. gambar/objek/template dari luar). Sematkan isinya ke dokumen.")
+                if 'TargetMode="External"' not in rel:
+                    continue
+                typ = re.search(r'Type="([^"]*)"', rel)
+                kind = typ.group(1).rsplit("/", 1)[-1] if typ else "?"
+                if kind.lower() in _BENIGN_EXTERNAL:
+                    continue            # hyperlink biasa; sumber data mail merge & template terlampir dibersihkan otomatis
+                target = re.search(r'Target="([^"]*)"', rel)
+                desc = _EXTERNAL_DESC.get(kind.lower(), f"objek tertaut berjenis '{kind}'")
+                raise CertError(
+                    f"Template memuat {desc} (bagian: {n.split('/')[-1].replace('.rels', '')}, "
+                    f"tujuan: {(target.group(1) if target else '?')[:90]}). Sematkan isinya ke dalam dokumen: "
+                    "di Word buka File → Info → Edit Links to Files → pilih tautan → Break Link, atau sisipkan "
+                    "ulang gambar lewat Insert → Pictures (bukan 'Link to File'). Lalu simpan sebagai .docx.")
+
+
+_MAILMERGE = re.compile(r"<w:mailMerge(?:\s[^>]*)?/>|<w:mailMerge(?:\s[^>]*)?>.*?</w:mailMerge>", re.DOTALL)
+_ATTACHED = re.compile(r"<w:attachedTemplate\b[^>]*/>")
+_DROP_REL = re.compile(r'<Relationship\b[^>]*Type="[^"]*/(?:attachedTemplate|mailMergeSource)"[^>]*/>')
+
+
+def sanitize_template(data: bytes) -> bytes:
+    """Buang sumber data Mail Merge & template terlampir (tautan ke file di PC pembuat template).
+
+    Keduanya tidak dibutuhkan AUTOCert (data diambil dari Excel yang diunggah) dan bisa membuat Word menampilkan
+    dialog koneksi data saat dokumen dibuka otomatis. Tag/field «Nama» tetap utuh. Idempoten.
+    """
+    try:
+        zin = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise CertError("Isi berkas bukan dokumen Word (.docx) yang valid.")
+    changed = False
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            blob = zin.read(info.filename)
+            if info.filename == "word/settings.xml":
+                text = blob.decode("utf-8")
+                new = _ATTACHED.sub("", _MAILMERGE.sub("", text))
+            elif info.filename == "word/_rels/settings.xml.rels":
+                text = blob.decode("utf-8")
+                new = _DROP_REL.sub("", text)
+            else:
+                zout.writestr(info.filename, blob)
+                continue
+            if new != text:
+                changed = True
+                blob = new.encode("utf-8")
+            zout.writestr(info.filename, blob)
+    return out.getvalue() if changed else data
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +494,7 @@ Progress = Callable[[int, int, str], None]
 def generate(template: bytes, df: pd.DataFrame, name_cols: list[str], fmt: str = "pdf",
              backend: Optional[str] = None, progress: Optional[Progress] = None) -> GenResult:
     require_docx()
+    template = sanitize_template(template)
     fmt = fmt.lower()
     if fmt not in ("pdf", "docx"):
         raise CertError("Format keluaran harus PDF atau DOCX.")

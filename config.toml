@@ -1,0 +1,9 @@
+[server]
+maxUploadSize = 25            # MB, selaras dengan sheetlib.MAX_FILE_MB
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#2563EB"

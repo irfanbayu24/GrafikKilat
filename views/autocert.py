@@ -27,9 +27,9 @@ def show_df(data: pd.DataFrame) -> None:
 # Cache (hanya di memori server; kedaluwarsa otomatis)
 # ---------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, max_entries=3, ttl=1800)
-def cached_validate_template(filename: str, data: bytes) -> bool:
+def cached_prepare_template(filename: str, data: bytes) -> bytes:
     certlib.validate_template(filename, data)
-    return True
+    return certlib.sanitize_template(data)
 
 
 @st.cache_data(show_spinner="Membaca data peserta…", max_entries=3, ttl=1800)
@@ -88,7 +88,7 @@ def render() -> None:
     data_name, data_bytes = participants
 
     try:
-        cached_validate_template(tpl_name, tpl_bytes)
+        tpl_bytes = cached_prepare_template(tpl_name, tpl_bytes)
     except sl.SpreadsheetError as e:
         st.error(f"❌ Template: {esc_md(e)}")
         return

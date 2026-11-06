@@ -73,6 +73,45 @@ cl.validate_template("t.docx", tweak(rels=b'<Relationship Id="rY" Type="http://s
 check("hyperlink biasa tetap boleh", True)
 expect_error("terlalu besar", lambda: cl.validate_template("t.docx", b"PK" + b"0" * (cl.MAX_TEMPLATE_MB * 1024 * 1024 + 1)))
 
+print("== 1b. Template hasil Word Mail Merge (sumber data tertaut)")
+MM_SETTINGS = (b'<w:mailMerge xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+               b'<w:mainDocumentType w:val="formLetters"/><w:dataType w:val="native"/><w:dataSource r:id="rId1"/></w:mailMerge>')
+def with_mail_merge(extra_rel=b""):
+    zin = zipfile.ZipFile(io.BytesIO(TPL)); out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for i in zin.infolist():
+            data = zin.read(i.filename)
+            if i.filename == "word/settings.xml":
+                data = data.replace(b"</w:settings>", b'<w:attachedTemplate xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId2"/>' + MM_SETTINGS + b"</w:settings>")
+            z.writestr(i.filename, data)
+        z.writestr("word/_rels/settings.xml.rels",
+            b'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/mailMergeSource" Target="file:///C:\\Users\\x\\peserta.xlsx" TargetMode="External"/>'
+            b'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate" Target="file:///C:\\Users\\x\\Normal.dotm" TargetMode="External"/>'
+            + extra_rel + b"</Relationships>")
+    return out.getvalue()
+MM = with_mail_merge()
+cl.validate_template("t.docx", MM); check("sumber data mail merge & template terlampir tidak lagi ditolak", True)
+clean = cl.sanitize_template(MM)
+zc = zipfile.ZipFile(io.BytesIO(clean))
+check("w:mailMerge & attachedTemplate dibuang dari settings", b"mailMerge" not in zc.read("word/settings.xml") and b"attachedTemplate" not in zc.read("word/settings.xml"))
+check("relasi eksternal dibuang", b"External" not in zc.read("word/_rels/settings.xml.rels"))
+check("idempoten (dua kali = hasil sama)", cl.sanitize_template(clean) == clean)
+check("template tanpa mail merge tidak diubah", cl.sanitize_template(TPL) == TPL)
+cl.validate_template("t.docx", clean); Document(io.BytesIO(clean)); check("hasil bersih tetap dokumen Word valid", True)
+rm = cl.generate(MM, pd.DataFrame([row]), ["Nama"], "docx")
+fn, dd = cl.first_file(rm.data)
+check("generate dari template mail merge: tag terganti & tautan hilang",
+      "Budi & <Santoso>" in "\n".join(cl.extract_text(dd)) and b"mailMerge" not in zipfile.ZipFile(io.BytesIO(dd)).read("word/settings.xml"))
+try:
+    cl.validate_template("t.docx", with_mail_merge(
+        b'<Relationship Id="rI" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="file:///C:\\logo.png" TargetMode="External"/>'))
+    check("gambar tertaut ditolak", False)
+except cl.CertError as e:
+    msg = str(e); print("       ->", msg[:230])
+    check("gambar tertaut ditolak dengan pesan spesifik (jenis, tujuan, cara memperbaiki)",
+          "gambar" in msg and "logo.png" in msg and "Break Link" in msg)
+
 print("== 2. Mail merge")
 m = cl.Merger(cols)
 out = m.merge(TPL, row)

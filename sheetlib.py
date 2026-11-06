@@ -334,6 +334,8 @@ def _try_numeric(s: pd.Series, nn: pd.Series):
     if len(strs):
         if strs.str.fullmatch(r"(0\d+|\+\d+)").any():
             return None  # kode berawalan 0 / nomor telepon: biarkan sebagai teks
+        if strs.str.fullmatch(r"-?\d{16,}").any():
+            return None  # ID panjang (NIK 16 digit, NIP 18 digit): jadi float = digit belakang hilang
         dot_k, comma_k = _number_style(strs)
 
     def clean(v):
@@ -502,16 +504,31 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
     return safe.to_csv(index=False).encode("utf-8-sig")
 
 
-def to_excel_bytes(df: pd.DataFrame) -> bytes:
+def to_excel_sheets(sheets: dict) -> bytes:
+    """Tulis beberapa DataFrame ke satu file Excel (satu sheet per entri).
+
+    Teks berawalan '=' dinetralkan agar tidak dieksekusi sebagai rumus saat dibuka di Excel.
+    """
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Data")
-        ws = writer.sheets["Data"]
-        for row in ws.iter_rows(min_row=2):  # jangan biarkan teks berawalan '=' dieksekusi sebagai rumus
-            for cell in row:
-                if cell.data_type == "f":
-                    cell.data_type = "s"
+        for name, df in sheets.items():
+            sheet_name = re.sub(r"[\[\]:*?/\\]", "_", str(name))[:31] or "Sheet"
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+            ws = writer.sheets[sheet_name]
+            for idx, col in enumerate(df.columns, start=1):     # hanya kolom teks yang memuat '=' di awal
+                s_col = df[col]
+                if pd.api.types.is_numeric_dtype(s_col) or pd.api.types.is_datetime64_any_dtype(s_col):
+                    continue
+                if not s_col.map(lambda v: isinstance(v, str) and v.startswith("=")).any():
+                    continue
+                for (cell,) in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
+                    if cell.data_type == "f":
+                        cell.data_type = "s"
     return buf.getvalue()
+
+
+def to_excel_bytes(df: pd.DataFrame) -> bytes:
+    return to_excel_sheets({"Data": df})
 
 
 def make_sample_xlsx() -> bytes:

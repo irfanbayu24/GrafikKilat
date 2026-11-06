@@ -107,4 +107,16 @@ assert conv(["1,234", "2,500", "1,000,000"]) == [1234, 2500, 1000000]  # ribuan 
 assert conv(["12,5", "3,25", "4"]) == [12.5, 3.25, 4]                   # desimal koma
 assert conv(["+62812", "+62813"]) == ["+62812", "+62813"]               # telepon tetap teks
 assert conv([True, False, True]) == ["Ya", "Tidak", "Ya"]
+
+# ---- 9. ID panjang (NIK/NIP) berbentuk teks tidak boleh rusak
+r = pd.DataFrame([["NIP"], ["198001012005011001"], ["199002022010012002"]], dtype=object)
+ids = sl.build_dataframe(r, 0)[0]["NIP"].tolist()
+assert ids == ["198001012005011001", "199002022010012002"], ids   # dulu: 1.98001012005011e+17 (digit hilang)
+assert conv(["3201010101010001", "3201010101010002"]) == ["3201010101010001", "3201010101010002"]
+assert conv(["12345", "67890"]) == [12345, 67890]                 # angka biasa tetap numerik
+# ---- 10. Ekspor multi-sheet
+mb = sl.to_excel_sheets({"A": pd.DataFrame({"x": ["=1+1", "ok"]}), "B:C?": pd.DataFrame({"y": [1, 2]})})
+import openpyxl as _ox
+_wb = _ox.load_workbook(io.BytesIO(mb)); assert _wb.sheetnames == ["A", "B_C_"], _wb.sheetnames
+assert _wb["A"]["A2"].data_type != "f"
 print("\nSEMUA PENGUJIAN LULUS")
