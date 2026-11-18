@@ -77,6 +77,37 @@ check("tanpa kolom unit (nama saja): 'Citra Dewi'", m0.match_text("Citra Dewi").
 check("noise bisa diubah (mis. 'bkt' dibuang dari teks)", ml.tokenize("Pak Dr Budi iPhone", NOISE) == ["budi"] and ml.tokenize("Pak Budi", frozenset()) == ["pak", "budi"])
 check("baris nama kosong di File 1 dicatat", mk().blank_rows == [8])
 
+print("== 4b. Unit panjang/berkurung, singkatan, dan diagnosis alasan")
+F1L = pd.DataFrame({"Unit": ["Sekretariat Badan (Setban)", "Sekretariat Badan (Setban)", "Pusat Data dan Informasi"],
+                    "Nama": ["Budi Santoso", "Ani Lestari", "Eka Putri"]})
+def mkL(**kw):
+    base = dict(noise=NOISE, unit_overlap=1.0, name_only_fallback=False, max_extra=0, typo=True); base.update(kw)
+    return ml.Matcher(F1L, "Unit", "Nama", **base)
+oc = mkL().match_text("Sekretariat Badan - Budi")
+check("aturan KETAT gagal pada unit berkurung ('Setban' tidak ditulis) -> alasan jelas + unit terdekat",
+      oc.status == "Tidak cocok" and oc.reason == "Unit tidak dikenali di teks" and "Sekretariat Badan (Setban)" in oc.nearest and "67%" in oc.nearest, (oc.reason, oc.nearest))
+oc = mkL(unit_overlap=0.5).match_text("Sekretariat Badan - Budi")
+check("aturan LONGGAR (separuh kata unit) mencocokkannya; keyakinan turun ke Sedang + catatan unit sebagian",
+      oc.status == "Cocok" and oc.confidence == "Sedang" and "sebagian" in oc.note, (oc.status, oc.confidence, oc.note))
+oc = mkL(unit_overlap=0.5).match_text("Sekretariat Badan (Setban) - Budi Santoso")
+check("unit lengkap + nama persis tetap Tinggi", oc.status == "Cocok" and oc.confidence == "Tinggi", (oc.status, oc.confidence))
+al = ml.parse_aliases("Setban, Sekban = Sekretariat Badan (Setban)\nPusdatin = Pusat Data dan Informasi\nbaris tanpa sama dengan")
+check("parse singkatan unit", al == [(["Setban", "Sekban"], "Sekretariat Badan (Setban)"), (["Pusdatin"], "Pusat Data dan Informasi")], al)
+ma = mkL(unit_aliases=al)
+check("singkatan buatan pengguna: 'Pusdatin - Eka Putri' -> Cocok Tinggi (aturan ketat)", ma.match_text("Pusdatin - Eka Putri").status == "Cocok" and ma.match_text("Pusdatin - Eka Putri").confidence == "Tinggi")
+check("singkatan lain & huruf besar: 'SEKBAN - Ani'", ma.match_text("SEKBAN - Ani").status == "Cocok")
+check("singkatan yang mengacu ke unit yang tak ada di File 1 dilaporkan",
+      mkL(unit_aliases=[(["x"], "Unit Tidak Ada")]).unknown_alias_units == ["Unit Tidak Ada"])
+mr = mk()
+R = lambda t: (mr.match_text(t).reason, mr.match_text(t).nearest)
+check("alasan: unit tak dikenali", R("Tamu Luar")[0] == "Unit tidak dikenali di teks")
+check("alasan: nama terlalu pendek", R("BKT - B")[0].startswith("Nama terlalu pendek"))
+check("alasan: nama ada di unit lain + menyebut orangnya", R("Biro Keuangan - Citra") == ("Nama ada, tetapi di unit lain", "ditemukan: Citra Dewi Lestari (BKT)"), R("Biro Keuangan - Citra"))
+check("alasan: kata asing + kandidat (aturan ketat)", R("BKT - Budi Raharjo")[0] == "Ada kata di teks yang tidak dikenali" and "Budi Santoso (BKT)" in R("BKT - Budi Raharjo")[1], R("BKT - Budi Raharjo"))
+check("alasan: nama tidak ditemukan di unit tsb", R("BKT - Zzzz Qqqq")[0] == "Nama tidak ditemukan di unit tersebut", R("BKT - Zzzz Qqqq"))
+check("alasan tanpa kolom unit: 'tidak ditemukan di File 1'", ml.Matcher(F1.drop(columns="Unit"), None, "Nama", noise=NOISE).match_text("Tamu Luar").reason == "Nama tidak ditemukan di File 1")
+oc = mr.match_text("BKT - Budi"); check("yang Cocok tidak punya alasan tidak cocok", oc.reason == "" and oc.nearest == "")
+
 print("== 5. Seluruh data + laporan")
 F2 = pd.DataFrame({"Display": ["BKT - Budi", "BKT - Budi Santoso", "Biro Keuangan - Budi", "citra - bkt", "Biro Umum - Budi S", "Tamu Luar",
                                "Pusdatin - Eka Putri", "Dr. Dedi (Biro Keuangan) iPhone", None, "BKT - Budi"], "Jam": ["08:00"] * 10})
@@ -95,6 +126,9 @@ check("ringkasan konsisten", s["hadir"] + s["belum_pasti"] + s["belum_hadir"] + 
 check("jumlah entri cocok per orang (Budi Santoso BKT dicatat 1x lewat nama lengkap)",
       int(res.hadir.loc[res.hadir["Nama"].eq("Budi Santoso") & res.hadir["Unit"].eq("BKT"), "Jumlah entri cocok di File 2"].iloc[0]) == 1)
 check("only_in_2 = baris asli File 2 (kolom Jam ikut)", list(res.only_in_2.columns) == ["Display", "Jam"] and set(res.only_in_2["Display"]) == {"Tamu Luar", "Pusdatin - Eka Putri"}, res.only_in_2)
+dt = res.detail
+check("rincian memuat alasan & petunjuk hanya untuk entri tidak cocok", (dt.loc[dt["Status"] == "Tidak cocok", "Alasan tidak cocok"] != "").all()
+      and (dt.loc[dt["Status"] != "Tidak cocok", "Alasan tidak cocok"] == "").all(), dt[["Status", "Alasan tidak cocok"]])
 check("rincian: ambigu menyebut kandidat", "Budi Santoso (BKT)" in res.detail.loc[res.detail["Status"] == "Ambigu", "Kandidat (jika ambigu)"].iloc[0])
 import sheetlib as sl, openpyxl
 wb = openpyxl.load_workbook(io.BytesIO(sl.to_excel_sheets(ml.build_report(res))))
